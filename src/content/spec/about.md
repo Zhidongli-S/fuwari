@@ -13,6 +13,8 @@ Fuwari牛逼，我这辈子都不会改博客框架了。
 
 - 在***教了我很多的好朋友：https://ie.cx
 
+- 晓晴博客： https://www.toubiec.cn/
+
 - 私人grgk：https://sub.grgk.me
 
 - Gunbrad的博客：https://gunbrad.xyz
