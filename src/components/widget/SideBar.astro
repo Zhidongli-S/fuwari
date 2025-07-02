@@ -13,7 +13,12 @@ const className = Astro.props.class;
 ---
 <div id="sidebar" class:list={[className, "w-full"]}>
     <div class="flex flex-col w-full gap-4 mb-4">
-        <Profile></Profile>        <!-- 赞助标 -->
+        <Profile></Profile>
+    </div>
+    <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
+        <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
+        <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
+        <!-- 赞助标 -->
         <div class="overflow-hidden flex justify-center">
             <iframe
                 src="https://support.nodeget.com/page/promotion?id=276"
@@ -21,9 +26,5 @@ const className = Astro.props.class;
                 transform: scale(1.0); transform-origin: center top;"
             ></iframe>
         </div>
-    </div>
-    <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
-        <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
-        <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
     </div>
 </div>

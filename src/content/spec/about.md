@@ -16,11 +16,15 @@ IP站点（实验性）：
 
 # 友情链接
 
+- **Secbit（本站CDN）**： https://secbit.ai
+
 - 带我入坑网站的超级大坏比： https://phira.dmocken.top/
 
 - 谷歌搜索 `site rbq.*` 找到的： https://saltedfishes.com
 
 - 雾创岛： https://www.tr0.cn/
+
+- 竹林品鉴： https://www.zlpj.com
 
 - 在***教了我很多的好朋友： https://ie.cx
 
