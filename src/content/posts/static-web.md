@@ -15,6 +15,18 @@ tags:
 title: N款CDN服务商的优缺点比较
 ---
 
+# [Netlify](https://www.netlify.com)
+
+注册门槛高，需要使用谷歌邮箱注册。支持IPv6回源。用量限制较宽松，仅有带宽和构建时间限制。 **我认为是免费计划里最快的CDN！并且限制很少！**
+
+![](https://sb-r2.afo.im/myblog/img/282ad19c-f971-4f92-9096-6e75308205c5.webp)
+
+因为节点禁Ping，所以这里用Tcping结果展示
+
+**推荐CNAME：** apex-loadbalancer.netlify.com
+
+![](https://sb-r2.afo.im/myblog/img/e11f4d07-4135-411e-943e-cf27690bc9c7.webp)
+
 # [Vercel](https://vercel.com)
 
 零成本用上。注册无门槛，延迟良好。用量限制较严格。仅支持IPv4回源。默认的 `*.vercel.app` 在国内会被SNI阻断，需要绑定自己的域名
@@ -58,16 +70,6 @@ title: N款CDN服务商的优缺点比较
 下图使用本人的分流优选： fenliu.072103.xyz
 
 ![](https://sb-r2.afo.im/myblog/img/f0785c5d-b31a-40d1-9da9-ac50a94f6b0a.webp)
-
-# [Netlify](https://www.netlify.com)
-
-注册门槛高，需要使用谷歌邮箱注册。支持IPv6回源。用量限制较严格
-
-![](https://sb-r2.afo.im/myblog/img/282ad19c-f971-4f92-9096-6e75308205c5.webp)
-
-因为节点禁Ping，所以这里用Tcping结果展示
-
-![](https://sb-r2.afo.im/myblog/img/9e24535c-ba3f-4245-92db-f90b87b3efe9.webp)
 
 # [Render](https://render.com)
 
