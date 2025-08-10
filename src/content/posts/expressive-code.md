@@ -11,9 +11,11 @@ draft: false
 原文链接:[Expressive Code Example](https://14131413.xyz/posts/default/expressive-code/)
 :::
 
+> ### 踩坑
 > 1. 首先按照fuwari原仓库commit进行修改,发现ac没推上去,构建第一次失败  
 > 2. 推完ac后发现在ec中引用了三个插件,但是pnpm astro add并没有自动安装,第二次修改  
 > 3. 现在正常跑起来了,但是由于2x主题的原因,样式很奇怪,再改一次
+> 4. 这下正常了,推pr去
 
 Here, we'll explore how code blocks look using [Expressive Code](https://expressive-code.com/). The provided examples are based on the official documentation, which you can refer to for further details.
 在这里，我们将探索使用 [Expressive Code](https://expressive-code.com/) 的代码块显示效果。提供的示例基于官方文档，您可以参考该文档获取更多细节。
