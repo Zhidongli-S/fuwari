@@ -18,6 +18,8 @@ QQ： 165624236 （易封，经常转生）
 
 TG： https://t.me/+blyHrp_GihhhMWVl
 
+Discord： https://discord.gg/qaCDqsGA
+
 Matrix： m.2x.nz [详细教程](/posts/element/)
 
 Microsoft Team： https://teams.live.com/l/community/FBA6DNy_XOUr-3vxwI?v=g1
