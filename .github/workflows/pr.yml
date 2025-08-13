@@ -46,9 +46,7 @@ jobs:
           BRANCH_NAME=pr-${PR_NUMBER}
           wrangler pages deploy ./dist \
             --project-name=$CLOUDFLARE_PROJECT_NAME \
-            --branch=$BRANCH_NAME \
-            --account-id=$CLOUDFLARE_ACCOUNT_ID \
-            --api-token=$CLOUDFLARE_API_TOKEN
+            --branch=$BRANCH_NAME
 
       # 7. 在 PR 评论区发布预览链接
       - name: Comment preview URL on PR
