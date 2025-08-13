@@ -25,7 +25,7 @@
 
   /**
    * 获取 Umami 分享数据（websiteId、token）。
-   * 在缓存 TTL 内复用；并用全局 Promise 避免并发请求。
+   * 在缓存 TTL 内复用；并用全局 Promise 避免并发请求
    * @param {string} baseUrl
    * @param {string} shareId
    * @returns {Promise<{websiteId: string, token: string}>}
