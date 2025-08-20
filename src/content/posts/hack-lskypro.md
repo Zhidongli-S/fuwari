@@ -27,20 +27,14 @@ lang: ''
     # 全局 404 交给 @fallback 处理，不强制状态码
     error_page 404 @fallback;
 
-
-
     location / {
         try_files $uri $uri/ @fallback;
     }
-
-
 
     # 命名 location：交给 index.php，但不强制 200
     location @fallback {
         rewrite ^ /index.php last;
     }
-
-
 
     # -----------------------------
     # 特殊路径：/api/v2/ 也走 index.php，但不能强制 200
