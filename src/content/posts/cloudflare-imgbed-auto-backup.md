@@ -8,6 +8,9 @@ category: '记录'
 draft: false 
 lang: ''
 ---
+
+> 本文由 https://github.com/afoim/fuwari/pull/40 提供，非站长原创
+
 [https://github.com/yunsen2025/cloudflare-imgbed-auto-backup](https://github.com/yunsen2025/cloudflare-imgbed-auto-backup)
 [CloudFlare-ImgBed项目](https://github.com/MarSeventh/CloudFlare-ImgBed)用基于GitHub Actions定期自动备份数据脚本
 
