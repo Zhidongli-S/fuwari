@@ -1,7 +1,7 @@
 ---
 title: 记录破解兰空图床（Lsky-Pro）
 published: 2025-08-19T21:09:47
-description: '兰空图床是一个简洁易用（？）的图床框架，抓包了一下逆向过程，这玩意居然没加密...记录一下'
+description: '兰空图床是一个简洁易用（？）的图床框架，抓包了一下激活过程，这玩意居然没加密...记录一下'
 image: '../assets/images/2025-08-20-21-11-48-image.png'
 tags: [兰空图床]
 category: '记录'
