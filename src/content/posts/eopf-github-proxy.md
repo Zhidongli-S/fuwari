@@ -11,7 +11,7 @@ lang: ''
 
 # 开始实现
 
-> 源码： [GithubSiteProxyForCloudflareWorker/eopf.js at main · afoim/GithubSiteProxyForCloudflareWorker](https://github.com/afoim/GithubSiteProxyForCloudflareWorker/blob/main/eopf.js)
+> 源码： [afoim/EdgeOnePagesFunctionGithubProxy](https://github.com/afoim/EdgeOnePagesFunctionGithubProxy)
 
 首先请阅读 [这篇文章](/posts/gh-proxy/) 知晓大致原理。因为EdgeOne Page Function的写法跟Cloudflare Worker差不多
 
