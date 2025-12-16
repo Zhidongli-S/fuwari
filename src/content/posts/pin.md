@@ -1,6 +1,6 @@
 ---
 title: 加群向导
-image: https://t.alcy.cc/ycy
+image: https://https://eopfapi.acofork.com/pic?img=ua
 published: 2025-05-24
 pinned: true
 category: 置顶
