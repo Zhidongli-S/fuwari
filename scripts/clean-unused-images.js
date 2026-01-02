@@ -73,16 +73,41 @@ function extractImageReferences(content) {
 		references.add(match[1] || match[2]);
 	}
 
-	// 匹配 markdown 图片语法: ![alt](path)
-	const markdownImageRegex = /!\[.*?\]\(([^)]+)\)/g;
-	while ((match = markdownImageRegex.exec(content)) !== null) {
-		references.add(match[1]);
-	}
-
 	// 匹配 HTML img 标签: <img src="path">
 	const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 	while ((match = htmlImageRegex.exec(content)) !== null) {
 		references.add(match[1]);
+	}
+
+	// 匹配 markdown 图片语法: ![alt](path) - 更新为支持空格
+	// 标准 Markdown 图片语法: ![alt](url "title") 或 ![alt](url)
+	// 我们主要关心 url 部分，它可能包含空格，但通常会被 <> 包裹或者 URL 编码
+	// 但如果是本地文件引用，可能直接就是路径
+	
+	// 1. 匹配标准 Markdown 图片 ![...](...)
+	const markdownImageRegex = /!\[.*?\]\((.*?)\)/g;
+	while ((match = markdownImageRegex.exec(content)) !== null) {
+		let url = match[1].trim();
+		// 如果 URL 包含 title 部分 (例如 "path/to/image.png" "Title")，去除 title
+		// 简单的做法是看是否有空格后跟引号
+		const titleMatch = url.match(/^(\S+)\s+["'].*["']$/);
+		if (titleMatch) {
+			url = titleMatch[1];
+		} else {
+            // 处理可能的 URL 编码空格 (%20)
+            try {
+                url = decodeURIComponent(url);
+            } catch (e) {
+                // ignore
+            }
+        }
+        
+        // 移除可能存在的 <> 包裹 (CommonMark 标准允许 <path>)
+        if (url.startsWith('<') && url.endsWith('>')) {
+            url = url.slice(1, -1);
+        }
+        
+		references.add(url);
 	}
 
 	// 匹配 Astro Image 组件引用
