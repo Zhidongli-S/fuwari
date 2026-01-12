@@ -63,7 +63,8 @@ async function processMarkdownFile(filePath) {
 	}
 
 	// 2. 处理 Markdown 图片语法 ![alt](url)
-	const markdownImageRegex = /!\[.*?\]\((.*?)\)/g;
+	// 修复：支持 URL 中包含一层括号，例如 image(1).png
+	const markdownImageRegex = /!\[.*?\]\(((?:[^()]+|\([^()]*\))+)\)/g;
 	while ((match = markdownImageRegex.exec(content)) !== null) {
 		const fullUrl = match[1];
         // 去除可能的 title 部分
@@ -169,7 +170,18 @@ async function handleImageRename(markdownPath, imagePath) {
         return null;
     } else {
         // 相对路径
-        absolutePath = path.resolve(markdownDir, decodedPath);
+        const candidates = [decodedPath];
+        if (decodedPath !== imagePath) {
+            candidates.push(imagePath);
+        }
+
+        for (const candidate of candidates) {
+            const candidateAbs = path.resolve(markdownDir, candidate);
+            if (fs.existsSync(candidateAbs)) {
+                absolutePath = candidateAbs;
+                break;
+            }
+        }
     }
 
     if (!fs.existsSync(absolutePath)) {
@@ -248,8 +260,8 @@ async function handleImageRename(markdownPath, imagePath) {
     } else {
         newReferencePath = imagePath.substring(0, lastSeparatorIndex + 1) + newFilename;
     }
-    
-    return newReferencePath;
+
+    return newReferencePath.replace(/%20/g, "");
 }
 
 /**
