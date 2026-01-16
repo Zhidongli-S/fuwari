@@ -247,6 +247,7 @@ apk add curl unzip jq openssl tar iproute2 bash
 我们需要前往 https://ram.console.aliyun.com/profile/access-keys 创建一个RAM用户，你就会得到 `ACCESS_KEY_ID` 和 `ACCESS_KEY_SECRET` ，并且分配权限：`AliyunECSFullAccess`  `AliyunCDTFullAccess
 
 部署成功后，Cloudflare Worker将在每分钟检查一次CDT，如果超出流量阈值，会将指定ID的ECS停止
+![](../assets/images/aliyun-ecs-4rm-10.png)
 
 # 计费流程图
 带宽费（按固定带宽计费收取）：根据您指定的带宽峰值和计费时长后付费，与实际使用的流量无关。
