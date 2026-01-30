@@ -242,9 +242,147 @@ const bannerOffset =
 <!-- Cookie Consent by TermsFeed https://www.TermsFeed.com -->
 <script data-swup-ignore-script type="text/javascript" src="https://www.termsfeed.com/public/cookie-consent/4.2.0/cookie-consent.js" charset="UTF-8"></script>
 <script data-swup-ignore-script type="text/javascript" charset="UTF-8">
-document.addEventListener('DOMContentLoaded', function () {
-cookieconsent.run({"notice_banner_type":"simple","consent_type":"express","palette":"dark","language":"en","page_load_consent_levels":["strictly-necessary"],"notice_banner_reject_button_hide":false,"preferences_center_close_button_hide":false,"page_refresh_confirmation_buttons":false,"website_name":"AcoFork Blog","website_privacy_policy_url":"https://blog.acofork.com/posts/privacy-policy/"});
-});
+(function () {
+	const getStoredTheme = () => {
+		try {
+			const theme = localStorage.getItem("theme");
+			return theme === "light" || theme === "dark" || theme === "auto" ? theme : null;
+		} catch {
+			return null;
+		}
+	};
+
+	const getHue = () => {
+		try {
+			const stored = localStorage.getItem("hue");
+			if (stored) return Number.parseInt(stored);
+		} catch {
+		}
+		const configCarrier = document.getElementById("config-carrier");
+		const fallback = "250";
+		const raw = configCarrier?.dataset.hue || fallback;
+		return Number.parseInt(raw);
+	};
+
+	const getPalette = () => {
+		const theme = getStoredTheme();
+		if (theme === "dark") return "dark";
+		if (theme === "light") return "light";
+		if (document.documentElement.classList.contains("dark")) return "dark";
+		return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+	};
+
+	const baseConfig = {
+		notice_banner_type: "simple",
+		consent_type: "express",
+		language: "en",
+		page_load_consent_levels: ["strictly-necessary"],
+		notice_banner_reject_button_hide: false,
+		preferences_center_close_button_hide: false,
+		page_refresh_confirmation_buttons: false,
+		website_name: "AcoFork Blog",
+		website_privacy_policy_url: "https://blog.acofork.com/posts/privacy-policy/",
+	};
+
+	const markCookieConsentHeadAssetsPersistent = () => {
+		const attr = "data-swup-theme";
+		const candidates = document.head?.querySelectorAll?.("link[rel='stylesheet'][href], style, script[src]") ?? [];
+		candidates.forEach(el => {
+			if (!(el instanceof HTMLElement)) return;
+			if (el.hasAttribute(attr)) return;
+
+			const tag = el.tagName.toLowerCase();
+			if (tag === "link") {
+				const href = el.getAttribute("href") || "";
+				if (/termsfeed|cookie-consent|cookieconsent/i.test(href)) el.setAttribute(attr, "");
+				return;
+			}
+			if (tag === "script") {
+				const src = el.getAttribute("src") || "";
+				if (/termsfeed|cookie-consent|cookieconsent/i.test(src)) el.setAttribute(attr, "");
+				return;
+			}
+			if (tag === "style") {
+				const css = el.textContent || "";
+				if (
+					/termsfeed-com---/.test(css) ||
+					/\bcc-(nb|pc|cp)\b/.test(css) ||
+					/\bcc_(dialog|preferences|cp|nb|overlay|banner|modal)\b/.test(css) ||
+					/cookie\s*consent|cookieconsent/i.test(css)
+				) {
+					el.setAttribute(attr, "");
+				}
+			}
+		});
+	};
+
+	let scheduled = false;
+	const scheduleApplyPalette = () => {
+		if (scheduled) return;
+		scheduled = true;
+		requestAnimationFrame(() => {
+			scheduled = false;
+			const palette = getPalette();
+			document
+				.querySelectorAll(
+					".termsfeed-com---palette-dark, .termsfeed-com---palette-light",
+				)
+				.forEach(el => {
+					el.classList.remove("termsfeed-com---palette-dark", "termsfeed-com---palette-light");
+					el.classList.add(`termsfeed-com---palette-${palette}`);
+				});
+			document
+				.querySelectorAll(
+					".cc_dialog, .cc_preferences, .cc_cp, .cc_nb, .cc_overlay, .cc_banner, .cc_modal",
+				)
+				.forEach(el => {
+					el.classList.remove("dark", "light");
+					el.classList.add(palette);
+					el.style.setProperty("--hue", String(getHue()));
+				});
+		});
+	};
+
+	const runCookieConsent = () => {
+		const cc = window.cookieconsent;
+		if (!cc || typeof cc.run !== "function") return;
+		cc.run({ ...baseConfig, palette: getPalette() });
+		scheduleApplyPalette();
+	};
+
+	document.addEventListener("DOMContentLoaded", () => {
+		const ensureOverrides = () => {
+			if (document.getElementById("cookie-consent-overrides")) return;
+			const style = document.createElement("style");
+			style.id = "cookie-consent-overrides";
+			style.textContent = `
+.termsfeed-com---nb a, .termsfeed-com---pc a, .termsfeed-com---cp a { color: oklch(0.75 0.14 var(--hue)); }
+.termsfeed-com---palette-dark .cc-nb-okagree, .termsfeed-com---palette-light .cc-nb-okagree { background-color: oklch(0.7 0.14 var(--hue)); border-color: oklch(0.7 0.14 var(--hue)); }
+.termsfeed-com---palette-dark .cc-cp-footer-save, .termsfeed-com---palette-light .cc-cp-footer-save { background-color: oklch(0.7 0.14 var(--hue)); border-color: oklch(0.7 0.14 var(--hue)); }
+`.trim();
+			document.head.appendChild(style);
+		};
+
+		ensureOverrides();
+		markCookieConsentHeadAssetsPersistent();
+		new MutationObserver(markCookieConsentHeadAssetsPersistent).observe(document.head, {
+			childList: true,
+			subtree: true,
+		});
+
+		runCookieConsent();
+
+		new MutationObserver(scheduleApplyPalette).observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ["class", "style"],
+		});
+
+		new MutationObserver(scheduleApplyPalette).observe(document.body, {
+			childList: true,
+			subtree: true,
+		});
+	});
+})();
 </script>
 
 <!-- Basic Analytics -->
@@ -274,8 +412,14 @@ cookieconsent.run({"notice_banner_type":"simple","consent_type":"express","palet
 <!-- end of Site Experience & Interaction Analytics-->
 
 <!-- Google Adsense -->
-<script type="text/plain" data-cookie-consent="targeting" async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1683686345039700 data-swup-ignore-script"
-     crossorigin="anonymous"></script>
+<script
+	type="text/plain"
+	data-cookie-consent="targeting"
+	async
+	src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1683686345039700"
+	data-swup-ignore-script
+	crossorigin="anonymous"
+></script>
 <!-- end of Google Adsense-->
 
 <noscript>Free cookie consent management tool by <a href="https://www.termsfeed.com/">TermsFeed</a></noscript>
