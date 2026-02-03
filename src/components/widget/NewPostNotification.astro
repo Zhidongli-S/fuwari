@@ -195,6 +195,16 @@
         return diffs;
     }
 
+    function escapeHtml(text) {
+        if (!text) return text;
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     // Helper to show notification
     function showNotification(newPosts, timestamp, isFresh, initTime) {
         const minimizedBtn = document.getElementById('notification-minimized');
@@ -273,7 +283,7 @@
                         const colorClass = part.added ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 block my-1 p-1 rounded break-all whitespace-pre-wrap' :
                                          part.removed ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 block my-1 p-1 rounded break-all whitespace-pre-wrap' :
                                          'text-gray-500 dark:text-gray-400 block my-1 p-1 break-all whitespace-pre-wrap';
-                        return `<div class="${colorClass}">${part.value}</div>`;
+                        return `<div class="${colorClass}">${escapeHtml(part.value)}</div>`;
                     }).join('')}
                 </div>
                 ` : ''}
