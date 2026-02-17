@@ -1,4 +1,4 @@
-name: PR 检查与自动合并
+name: 友链/赞助 PR 检查与自动合并
 
 on:
   pull_request:
