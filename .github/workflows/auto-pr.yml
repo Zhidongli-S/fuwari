@@ -441,6 +441,30 @@ jobs:
             }
 
             const pr = await github.rest.pulls.get({ owner, repo, pull_number })
+            core.info(`event_name=${context.eventName}`)
+            core.info(`actor=${context.actor}`)
+            core.info(`issue_comment_author=${context.payload.comment?.user?.login || ''}`)
+            core.info(`pr.number=${pr.data.number}`)
+            core.info(`pr.state=${pr.data.state}, pr.draft=${pr.data.draft}`)
+            core.info(`pr.user=${pr.data.user?.login || ''}`)
+            core.info(`pr.head.ref=${pr.data.head?.ref || ''}`)
+            core.info(`pr.head.sha=${pr.data.head?.sha || ''}`)
+            core.info(`pr.head.repo.fork=${pr.data.head?.repo?.fork}`)
+            core.info(`pr.base.ref=${pr.data.base?.ref || ''}`)
+            core.info(`pr.base.repo.private=${pr.data.base?.repo?.private}`)
+            core.info(`pr.maintainer_can_modify=${pr.data.maintainer_can_modify}`)
+            core.info(`pr.mergeable=${pr.data.mergeable}`)
+            core.info(`pr.mergeable_state=${pr.data.mergeable_state}`)
+            core.info(`pr.rebaseable=${pr.data.rebaseable}`)
+            core.info(`pr.auto_merge=${pr.data.auto_merge ? 'enabled' : 'disabled'}`)
+            core.info(`pr.labels=${(pr.data.labels || []).map((l) => l.name).join(',')}`)
+
+            try {
+              const auth = await github.rest.apps.getAuthenticated()
+              core.info(`authenticated_app=${auth.data?.name || ''}`)
+            } catch (e) {
+              core.info(`getAuthenticated failed: ${e?.status || ''} ${e?.message || e}`)
+            }
             const prLabels = new Set((pr.data.labels || []).map((l) => l.name))
             if (!prLabels.has(LABEL_FRIEND) && !prLabels.has(LABEL_SPONSOR)) {
               core.info('PR is not labeled as 友链/赞助. Skip.')
@@ -617,6 +641,19 @@ jobs:
             try {
               await github.rest.pulls.merge({ owner, repo, pull_number, merge_method: 'squash' })
             } catch (e) {
-              await createComment(`自动合并失败：${e?.message || e}`)
+              core.error(`merge failed: status=${e?.status || ''}`)
+              core.error(`merge failed: message=${e?.message || e}`)
+              try {
+                core.error(`merge failed: response=${JSON.stringify(e?.response?.data || null)}`)
+              } catch {}
+              await createComment(
+                [
+                  '自动合并失败。',
+                  '',
+                  `错误信息：${e?.message || e}`,
+                  `HTTP 状态：${e?.status || 'unknown'}`,
+                  `响应：${(() => { try { return JSON.stringify(e?.response?.data || null) } catch { return 'unavailable' } })()}`,
+                ].join('\n')
+              )
               return
             }
