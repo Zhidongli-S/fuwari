@@ -1,4 +1,4 @@
-name: PR JSON Check
+name: 2PR JSON Check
 
 on:
   workflow_run:

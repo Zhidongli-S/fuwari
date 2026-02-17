@@ -1,0 +1,143 @@
+name: 3PR Title Update From JSON
+
+on:
+  workflow_run:
+    workflows: ["PR JSON Check"]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  update-title:
+    if: |
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse JSON and update title
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const validLabel = "有效 JSON";
+            const friendLabel = "友链";
+            const sponsorLabel = "赞助";
+
+            async function processPR(prNumber) {
+
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+
+              const labels = pr.data.labels.map(l => l.name);
+
+              // 仅处理 有效 JSON 的 PR
+              if (!labels.includes(validLabel)) {
+                console.log(`PR #${prNumber} skipped (not valid JSON)`);
+                return;
+              }
+
+              let typePrefix = null;
+
+              if (labels.includes(friendLabel)) {
+                typePrefix = "友链";
+              } else if (labels.includes(sponsorLabel)) {
+                typePrefix = "赞助";
+              } else {
+                console.log("No type label found.");
+                return;
+              }
+
+              const files = await github.paginate(
+                github.rest.pulls.listFiles,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                }
+              );
+
+              let nameValue = null;
+
+              for (const file of files) {
+                if (file.status === "removed") continue;
+
+                if (file.filename.endsWith(".json")) {
+
+                  const content = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path: file.filename,
+                    ref: pr.data.head.sha
+                  });
+
+                  const buff = Buffer.from(content.data.content, 'base64');
+                  const text = buff.toString('utf8');
+                  const json = JSON.parse(text);
+
+                  if (json.name) {
+                    nameValue = json.name;
+                    break;
+                  }
+                }
+              }
+
+              if (!nameValue) {
+                console.log("No name field found.");
+                return;
+              }
+
+              const newTitle = `${typePrefix}：${nameValue}`;
+
+              if (pr.data.title === newTitle) {
+                console.log("Title already correct.");
+                return;
+              }
+
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                title: newTitle
+              });
+
+              console.log(`Updated PR title to: ${newTitle}`);
+            }
+
+            if (context.eventName === "workflow_dispatch") {
+
+              const prs = await github.paginate(
+                github.rest.pulls.list,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: "open",
+                }
+              );
+
+              for (const pr of prs) {
+                await processPR(pr.number);
+              }
+
+            } else {
+
+              const prNumber = context.payload.workflow_run.pull_requests[0]?.number;
+
+              if (prNumber) {
+                await processPR(prNumber);
+              } else {
+                console.log("No PR associated with workflow_run.");
+              }
+
+            }

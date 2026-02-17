@@ -1,4 +1,4 @@
-name: PR Data Path Check
+name: 1PR Data Path Check
 
 on:
   pull_request:
