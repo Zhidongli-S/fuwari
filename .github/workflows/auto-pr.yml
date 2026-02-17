@@ -489,6 +489,7 @@ jobs:
 
             const primaryKind = prLabels.has(LABEL_SPONSOR) ? 'sponsor' : 'friend'
             const primary = parsedEntries.find((e) => e.kind === primaryKind) || parsedEntries[0]
+            const hasVipField = Object.prototype.hasOwnProperty.call(primary.data, 'vip')
 
             await github.rest.pulls.update({
               owner,
@@ -580,6 +581,11 @@ jobs:
               } catch (e) {
                 if (e.status !== 404) throw e
               }
+            }
+
+            if (hasVipField) {
+              await createComment('检测到 JSON 存在 vip 字段：已通过校验但不进行自动合并，请维护者手动处理。')
+              return
             }
 
             try {
