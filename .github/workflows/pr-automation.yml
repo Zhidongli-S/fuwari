@@ -16,8 +16,11 @@ jobs:
   path-check:
     if: github.event_name != 'issue_comment'
     runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.gate.outputs.should_run }}
     steps:
       - name: Check PR file paths
+        id: gate
         uses: actions/github-script@v7
         with:
           script: |
@@ -25,12 +28,13 @@ jobs:
 
             if (context.eventName === "workflow_dispatch") {
               console.log("workflow_dispatch: skip path-check (no single PR context)");
+              core.setOutput("should_run", "true");
               return;
             }
 
             const allowedPaths = [
-              /^data\/friends\/.+\.json$/,
-              /^data\/sponsors\/.+\.json$/
+              /^src\/data\/friends\/.+\.json$/,
+              /^src\/data\/sponsors\/.+\.json$/
             ];
 
             const prNumber = context.payload.pull_request.number;
@@ -48,6 +52,7 @@ jobs:
 
             if (!files.length) {
               console.log("No files changed.");
+              core.setOutput("should_run", "false");
               return;
             }
 
@@ -78,27 +83,31 @@ jobs:
             if (invalidPath) {
 
               console.log("Invalid file path detected.");
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: "path-check-passed"
+                });
+              } catch (e) {}
 
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: "❌ JSON 文件路径不合法，仅允许修改 data/friends/ 或 data/sponsors/ 目录。"
-              });
-
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                state: "closed"
-              });
-
+              core.setOutput("should_run", "false");
               return;
             }
 
             if (!validJsonChanged) {
 
               console.log("No JSON files changed.");
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: "path-check-passed"
+                });
+              } catch (e) {}
 
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
@@ -107,10 +116,20 @@ jobs:
                 labels: ["invalid-json"]
               });
 
+              core.setOutput("should_run", "false");
               return;
             }
 
             console.log("Path check passed.");
+
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: "invalid-json"
+              });
+            } catch (e) {}
 
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
@@ -119,10 +138,11 @@ jobs:
               labels: ["path-check-passed"]
             });
 
+            core.setOutput("should_run", "true");
             console.log("=== PR Data Path Check Finished ===");
 
   json-check:
-    if: github.event_name != 'issue_comment'
+    if: github.event_name != 'issue_comment' && needs.path-check.outputs.should_run == 'true'
     needs: [path-check]
     runs-on: ubuntu-latest
     steps:
@@ -244,8 +264,8 @@ jobs:
             }
 
   title-update:
-    if: github.event_name != 'issue_comment'
-    needs: [json-check]
+    if: github.event_name != 'issue_comment' && needs.path-check.outputs.should_run == 'true'
+    needs: [path-check, json-check]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -365,8 +385,8 @@ jobs:
             }
 
   link-check:
-    if: github.event_name != 'issue_comment'
-    needs: [title-update]
+    if: github.event_name != 'issue_comment' && needs.path-check.outputs.should_run == 'true'
+    needs: [path-check, title-update]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -539,8 +559,8 @@ jobs:
             }
 
   ownership-init:
-    if: github.event_name != 'issue_comment'
-    needs: [link-check]
+    if: github.event_name != 'issue_comment' && needs.path-check.outputs.should_run == 'true'
+    needs: [path-check, link-check]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -679,8 +699,8 @@ jobs:
             console.log("=== Ownership Verification Init Finished ===");
 
   ownership-verify:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && (github.event.action == 'synchronize' || github.event.action == 'reopened'))
-    needs: [ownership-init]
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && (github.event.action == 'synchronize' || github.event.action == 'reopened'))) && needs.path-check.outputs.should_run == 'true'
+    needs: [path-check, ownership-init]
     runs-on: ubuntu-latest
     steps:
       - name: Final ownership verification
