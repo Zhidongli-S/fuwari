@@ -1,583 +1,234 @@
-name: 友链/赞助 PR 检查与自动合并
+name: Friend / Sponsor Auto Verify
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "模式：检查单个 PR 或所有开启的 PR"
-        required: true
-        default: "single"
-        type: choice
-        options:
-          - single
-          - all_open
-      pr_number:
-        description: "PR 编号（single 模式下必填）"
-        required: false
-        type: string
+  issue_comment:
+    types: [created]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
-  checks: write
+  issues: write
 
 jobs:
-  pr-check:
+  verify:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
     runs-on: ubuntu-latest
+
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 设置 Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: 获取变更文件 (PR 触发)
+      # ---------------------------
+      # PR 基础校验阶段
+      # ---------------------------
+      - name: Base Validation
         if: github.event_name == 'pull_request'
-        id: changed-files
-        uses: tj-actions/changed-files@v44
+        id: base
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED=$(git diff --name-status origin/${{ github.base_ref }}...HEAD)
+
+          echo "$CHANGED"
+
+          COUNT=$(echo "$CHANGED" | wc -l)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "❌ 仅允许新增一个文件"
+            exit 1
+          fi
+
+          STATUS=$(echo "$CHANGED" | awk '{print $1}')
+          FILE=$(echo "$CHANGED" | awk '{print $2}')
+
+          if [ "$STATUS" != "A" ]; then
+            echo "❌ 仅允许新增文件"
+            exit 1
+          fi
+
+          if [[ ! "$FILE" =~ ^src/data/(friends|sponsors)/ ]]; then
+            echo "❌ 只能修改 friends 或 sponsors 目录"
+            exit 1
+          fi
+
+          if [[ "$FILE" != *.json ]]; then
+            echo "❌ 文件必须为 .json"
+            exit 1
+          fi
+
+          jq empty "$FILE" || { echo "❌ JSON 格式错误"; exit 1; }
+
+          NAME=$(jq -r '.name' "$FILE")
+          URL=$(jq -r '.url' "$FILE")
+          AVATAR=$(jq -r '.avatar' "$FILE")
+
+          if [ -z "$NAME" ] || [ "$NAME" = "null" ]; then
+            echo "❌ 缺少 name"
+            exit 1
+          fi
+
+          if [[ ! "$URL" =~ ^https?:// ]]; then
+            echo "❌ URL 必须为 http/https"
+            exit 1
+          fi
+
+          if [[ ! "$AVATAR" =~ ^https?:// ]]; then
+            echo "❌ avatar 必须为 http/https"
+            exit 1
+          fi
+
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "avatar=$AVATAR" >> $GITHUB_OUTPUT
+          echo "sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+
+      # ---------------------------
+      # URL 检测（允许 10 次跳转）
+      # ---------------------------
+      - name: Check URL reachable
+        if: github.event_name == 'pull_request'
+        run: |
+          STATUS=$(curl -L -o /dev/null \
+            --max-time 15 \
+            --connect-timeout 5 \
+            --max-redirs 10 \
+            -w "%{http_code}" \
+            "${{ steps.base.outputs.url }}")
+
+          if [[ "$STATUS" -lt 200 || "$STATUS" -ge 400 ]]; then
+            echo "❌ URL 不可达"
+            exit 1
+          fi
+
+      - name: Check Avatar reachable
+        if: github.event_name == 'pull_request'
+        run: |
+          STATUS=$(curl -L -o /dev/null \
+            --max-time 15 \
+            --connect-timeout 5 \
+            --max-redirs 10 \
+            -w "%{http_code}" \
+            "${{ steps.base.outputs.avatar }}")
+
+          if [[ "$STATUS" -lt 200 || "$STATUS" -ge 400 ]]; then
+            echo "❌ Avatar 不可达"
+            exit 1
+          fi
+
+      # ---------------------------
+      # 更新 PR 标题
+      # ---------------------------
+      - name: Update PR title
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
         with:
-          files: |
-            src/data/friends/**
-            src/data/sponsors/**
+          script: |
+            const file = "${{ steps.base.outputs.file }}"
+            const name = "${{ steps.base.outputs.name }}"
+            let title = file.includes("friends")
+              ? `友链：${name}`
+              : `赞助：${name}`
 
-      - name: 处理 PR (PR 触发)
-        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              title
+            })
+
+      # ---------------------------
+      # 生成验证挑战
+      # ---------------------------
+      - name: Create ownership challenge
+        if: github.event_name == 'pull_request'
+        id: challenge
         run: |
-          # 创建内联检查脚本
-          cat << 'EOF' > check-pr-content.js
-          const fs = require('fs');
-          const https = require('https');
-          const http = require('http');
-          
-          const TIMEOUT = 10000;
-          
-          const colors = {
-              reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m', blue: '\x1b[34m'
-          };
-          
-          function validateJson(filePath) {
-              try {
-                  let content = fs.readFileSync(filePath, 'utf8');
-                  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
-                  content = content.trim();
-                  
-                  // Handle markdown backtick wrapping
-                  if (content.startsWith('`') && content.endsWith('`')) {
-                      content = content.slice(1, -1).trim();
-                  }
-                  if (content.startsWith('```')) {
-                      const lines = content.split('\n');
-                      if (lines.length >= 2) {
-                          let endIndex = lines.length - 1;
-                          while (endIndex > 0 && !lines[endIndex].trim().startsWith('```')) endIndex--;
-                          if (endIndex > 0) content = lines.slice(1, endIndex).join('\n').trim();
-                      }
-                  }
-                  // Double check backticks after markdown block removal
-                  if (content.startsWith('`') && content.endsWith('`')) content = content.slice(1, -1).trim();
-                  
-                  // STRICT JSON PARSING: We do NOT try to "fix" invalid JSON structure (like missing quotes).
-                  // We only stripped the markdown container. Now we parse.
-                  // If content is `{ name: "..." }` (unquoted keys), JSON.parse WILL fail, and that is CORRECT.
-                  // User said: "He is not a json, how did you pass?" -> implying we were too lenient.
-                  // The previous "aggressive cleanup" (removing all newlines) might have accidentally made invalid JSON valid 
-                  // or just masked the error in a way that produced partial data?
-                  // Actually, removing newlines from `{ "a": \n "b" }` makes it valid.
-                  // But removing newlines from `{ name: "..." }` -> `{name:"..."}` still invalid.
-                  // Wait, the user's example: 
-                  // { "avatar": https://... } <- Missing quotes around URL value!
-                  // JSON.parse WILL fail on this.
-                  // So why did it pass? 
-                  // Maybe the previous logic `try { ... } catch (e) { remove newlines ... }`
-                  // removing newlines doesn't fix missing quotes.
-                  // Unless... the user's previous example WAS valid but had markdown formatting.
-                  // This NEW example has missing quotes.
-                  
-                  // Let's rely strictly on JSON.parse. 
-                  // We do NOT use eval() or relaxed parsers.
-                  
-                  const data = JSON.parse(content);
-                  
-                  // Post-process values (clean up backticks INSIDE string values if present)
-                  if (data.url) data.url = data.url.replace(/^[`\s]+|[`\s]+$/g, '');
-                  if (data.avatar) data.avatar = data.avatar.replace(/^[`\s]+|[`\s]+$/g, '');
-                  if (data.name) data.name = data.name.replace(/^[`\s]+|[`\s]+$/g, '');
-                  
-                  if (!data.name || !data.url) return { isValid: false, error: "Missing required fields: 'name' or 'url'" };
-                  return { isValid: true, data, error: null };
-                  
-              } catch (err) {
-                  return { isValid: false, error: "Invalid JSON syntax: " + err.message };
-              }
-          }
-          
-          function checkUrl(url) {
-              return new Promise((resolve) => {
-                  if (!url) { resolve({ ok: false, status: 'Missing URL' }); return; }
-                  if (!url.startsWith('http')) { resolve({ ok: true, status: 'Skipped (Non-HTTP)' }); return; }
-                  
-                  const client = url.startsWith('https') ? https : http;
-                  const req = client.request(url, { method: 'GET', headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: TIMEOUT }, (res) => {
-                      res.resume();
-                      if (res.statusCode >= 200 && res.statusCode < 400) resolve({ ok: true, status: res.statusCode });
-                      else resolve({ ok: false, status: res.statusCode });
-                  });
-                  req.on('error', (err) => { resolve({ ok: false, status: err.message }); });
-                  req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 'Timeout' }); });
-                  req.end();
-              });
-          }
-          
-          async function checkPrFile(filePath) {
-              console.log(`\n${colors.blue}Processing: ${filePath}${colors.reset}`);
-              const jsonResult = validateJson(filePath);
-              if (!jsonResult.isValid) {
-                  console.error(`${colors.red}❌ JSON 验证失败: ${jsonResult.error}${colors.reset}`);
-                  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=json_invalid\n");
-                  process.exit(1);
-              }
-              const data = jsonResult.data;
-              console.log(`${colors.green}✅ JSON 语法正确${colors.reset}`);
-              console.log("解析后的 JSON 内容:");
-              console.log(JSON.stringify(data, null, 2));
-              console.log(`名称: ${data.name}`);
-              console.log(`URL: ${data.url}`);
-              if (data.avatar) console.log(`头像: ${data.avatar}`);
-              
-              console.log("正在测试 URL 连通性...");
-              const urlCheck = await checkUrl(data.url);
-              if (!urlCheck.ok) {
-                  console.error(`${colors.red}❌ 主链接不可达: ${urlCheck.status}${colors.reset}`);
-                  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=url_unreachable\n");
-                  process.exit(1);
-              }
-              console.log(`${colors.green}✅ 主链接可访问 (${urlCheck.status})${colors.reset}`);
-              
-              if (data.avatar && data.avatar.startsWith('http')) {
-                  console.log("正在测试头像连通性...");
-                  const avatarCheck = await checkUrl(data.avatar);
-                  if (!avatarCheck.ok) {
-                      console.error(`${colors.red}❌ 头像链接不可达: ${avatarCheck.status}${colors.reset}`);
-                      if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=avatar_unreachable\n");
-                      process.exit(1);
-                  }
-                  console.log(`${colors.green}✅ 头像链接可访问 (${avatarCheck.status})${colors.reset}`);
-              }
-              
-              if (process.env.GITHUB_OUTPUT) {
-                  fs.appendFileSync(process.env.GITHUB_OUTPUT, `name=${data.name}\n`);
-                  fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=none\n");
-              }
-          }
-          
-          const filePath = process.argv[2];
-          if (!filePath) { console.error("Usage: node check-pr-content.js <file-path>"); process.exit(1); }
-          checkPrFile(filePath).catch(err => { console.error("Unexpected Error:", err); process.exit(1); });
-          EOF
-          
-          echo "变更文件: $ALL_CHANGED_FILES"
-          
-          HAS_FRIENDS=false
-          HAS_SPONSORS=false
-          FRIEND_NAME=""
-          SPONSOR_NAME=""
-          ERROR_TYPE=""
-          
-          # 遍历变更文件
-          for file in $ALL_CHANGED_FILES; do
-            echo "正在检查文件: $file"
-            
-            # 检查文件是否存在（可能被删除）
-            if [ ! -f "$file" ]; then
-              echo "文件 $file 未找到（可能已删除），跳过。"
-              continue
-            fi
-            
-            # 运行检查脚本 (使用内联脚本)
-            # 清理之前的输出
-            echo "" > "$GITHUB_OUTPUT"
-            
-            if ! node check-pr-content.js "$file"; then
-              echo "::error file=$file::文件 $file 验证失败"
-              
-              # 获取错误类型
-              LAST_ERROR=$(grep "error_type=" "$GITHUB_OUTPUT" | tail -n 1 | cut -d= -f2)
-              if [ -z "$LAST_ERROR" ]; then LAST_ERROR="json_invalid"; fi # 默认回退
-              
-              if [ -z "$ERROR_TYPE" ]; then ERROR_TYPE="$LAST_ERROR"; fi
-              
-              # 优先级覆盖
-              if [ "$LAST_ERROR" == "json_invalid" ]; then ERROR_TYPE="json_invalid"; fi
-              
-              # 遇到错误停止检查
-              break
-            fi
-            
-            # 提取名称
-            NAME=$(jq -r .name "$file")
-            
-            if [[ "$file" == src/data/friends/* ]]; then
-              HAS_FRIENDS=true
-              FRIEND_NAME="$NAME"
-            elif [[ "$file" == src/data/sponsors/* ]]; then
-              HAS_SPONSORS=true
-              SPONSOR_NAME="$NAME"
-            fi
-          done
-          
-          # 标签管理函数
-          update_labels() {
-            local add_label="$1"
-            local pr="$2"
-            
-            # 定义所有可能的状态标签
-            local labels=("无效的json" "头像链接不可达" "网站链接不可达" "所有链接不可达" "链接检查通过")
-            
-            # 先移除所有状态标签
-            for label in "${labels[@]}"; do
-              if [ "$label" != "$add_label" ]; then
-                gh pr edit "$pr" --remove-label "$label" || true # 忽略标签不存在的错误
-              fi
-            done
-            
-            # 添加新标签
-            if [ -n "$add_label" ]; then
-              # 尝试创建标签（如果不存在），颜色默认为灰色或特定颜色
-              # 链接检查通过: 0E8A16 (绿色)
-              # 错误类: D73A4A (红色)
-              local color="EDEDED"
-              if [ "$add_label" == "链接检查通过" ]; then
-                color="0E8A16"
-              elif [[ "$add_label" == *"不可达"* ]] || [[ "$add_label" == *"无效"* ]]; then
-                color="D73A4A"
-              fi
-              
-              gh label create "$add_label" --color "$color" --force || true
-              gh pr edit "$pr" --add-label "$add_label"
-            fi
-          }
+          TOKEN=$(openssl rand -hex 6)
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
-          if [ -n "$ERROR_TYPE" ]; then
-             echo "验证失败，错误类型: $ERROR_TYPE"
-             LABEL=""
-             case "$ERROR_TYPE" in
-               "json_invalid") LABEL="无效的json" ;;
-               "url_unreachable") LABEL="网站链接不可达" ;;
-               "avatar_unreachable") LABEL="头像链接不可达" ;;
-               *) LABEL="所有链接不可达" ;;
-             esac
-             
-             update_labels "$LABEL" "$PR_NUMBER"
-             exit 1
-          fi
-          
-          # 如果执行到这里，说明所有检查通过
-          update_labels "链接检查通过" "$PR_NUMBER"
-          
-          # 重命名 PR
-          NEW_TITLE=""
-          if [ "$HAS_FRIENDS" = "true" ] && [ "$HAS_SPONSORS" = "true" ]; then
-             NEW_TITLE="添加友链/赞助：Multiple"
-          elif [ "$HAS_FRIENDS" = "true" ]; then
-             NEW_TITLE="添加友链：$FRIEND_NAME"
-          elif [ "$HAS_SPONSORS" = "true" ]; then
-             NEW_TITLE="添加赞助：$SPONSOR_NAME"
-          fi
-          
-          if [ -n "$NEW_TITLE" ]; then
-            echo "正在重命名 PR 为: $NEW_TITLE"
-            gh pr edit "$PR_NUMBER" --title "$NEW_TITLE"
-          fi
-          
-          # 处理合并/评论逻辑
-          if [ "$HAS_SPONSORS" = "true" ]; then
-            echo "包含赞助变更。添加评论但不合并。"
-            gh pr comment "$PR_NUMBER" --body "✅ 检查通过！由于涉及赞助信息，请等待管理员人工合并。"
-          elif [ "$HAS_FRIENDS" = "true" ]; then
-            echo "仅包含友链变更。自动合并..."
-            gh pr review "$PR_NUMBER" --approve -b "✅ 自动检查通过，准备合并。"
-            gh pr merge "$PR_NUMBER" --squash --auto || echo "自动合并失败（可能仓库设置未开启），但检查已通过。"
-          fi
+      - name: Comment Challenge
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = "${{ steps.challenge.outputs.token }}"
+            const sha = "${{ steps.base.outputs.sha }}"
+            const url = "${{ steps.base.outputs.url }}"
 
-      - name: 处理手动触发
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ github.token }}
+            const body = `
+基础检查已通过。
+
+请完成所有权验证：
+
+在你的网站创建：
+
+${url}/${token}.txt
+
+文件内容必须为：
+
+${sha}
+
+完成后请回复本 PR 任意内容触发验证。
+（此 token 永久有效）
+`
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            })
+
+      # ---------------------------
+      # 所有权验证阶段
+      # ---------------------------
+      - name: Ownership Verification
+        if: github.event_name == 'issue_comment'
         run: |
-          # 确保 Git 正确处理中文和特殊字符路径
-          git config --global core.quotepath false
-          
-          MODE="${{ inputs.mode }}"
-          PR_NUM="${{ inputs.pr_number }}"
-          
-          # 标签管理函数（重复逻辑）
-          update_labels() {
-            local add_label="$1"
-            local pr="$2"
-            local labels=("无效的json" "头像链接不可达" "网站链接不可达" "所有链接不可达" "链接检查通过")
-            for label in "${labels[@]}"; do
-              if [ "$label" != "$add_label" ]; then
-                gh pr edit "$pr" --remove-label "$label" || true 
-              fi
-            done
-            if [ -n "$add_label" ]; then
-              # 尝试创建标签（如果不存在）
-              local color="EDEDED"
-              if [ "$add_label" == "链接检查通过" ]; then
-                color="0E8A16"
-              elif [[ "$add_label" == *"不可达"* ]] || [[ "$add_label" == *"无效"* ]]; then
-                color="D73A4A"
-              fi
-              gh label create "$add_label" --color "$color" --force || true
-              gh pr edit "$pr" --add-label "$add_label"
-            fi
-          }
-          
-          validate_pr() {
-            local pr=$1
-            echo "正在验证 PR #$pr..."
-            
-            # 获取变更文件
-            files=$(gh pr diff "$pr" --name-only)
-            
-            # 处理中文/转义路径：如果包含反斜杠，尝试解码
-            if [[ "$files" == *"\\"* ]]; then
-               files=$(echo "$files" | while read -r line; do
-                 # 去除首尾引号
-                 line="${line%\"}"
-                 line="${line#\"}"
-                 # 解码 octal
-                 echo -e "$line"
-               done)
-            fi
-            
-            # 打印调试
-            echo "PR #$pr 解码后文件列表:"
-            echo "$files"
-            
-            # 过滤相关文件
-            relevant_files=""
-            # 使用 while read 循环处理包含空格的文件名
-            while IFS= read -r f; do
-              # 去除可能的空白符
-              f=$(echo "$f" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-              if [ -z "$f" ]; then continue; fi
-              
-              if [[ "$f" == src/data/friends/* ]] || [[ "$f" == src/data/sponsors/* ]]; then
-                # 检查文件扩展名是否为 .json
-                if [[ "$f" != *.json ]]; then
-                  echo "错误: 文件 $f 不是 .json 格式"
-                  # 设置错误类型并继续（或者直接标记失败）
-                  # 但我们现在是在收集文件列表阶段。如果文件不是 json，我们应该怎么处理？
-                  # 需求是：就算内容是 json，后缀不对也视为错误。
-                  # 我们可以将其加入列表，让后续脚本检查？或者直接在这里报错？
-                  # 既然是文件级检查，最好在这里就标记错误。
-                  # 但我们需要与脚本检查结果统一。
-                  # 方案：我们可以创建一个特殊的错误标记，或者让脚本检查后缀？
-                  # 脚本只能检查内容。所以在这里处理比较好。
-                  
-                  # 既然需要标记整个 PR 失败，我们可以设置一个 flag
-                  echo "发现非法文件后缀: $f"
-                  ERROR_TYPE="json_invalid" # 复用这个错误类型，或者新建 file_extension_invalid
-                  # 由于目前结构是在 validate_pr 内部，我们需要一种机制传递错误。
-                  # 我们可以在这里直接设置 ERROR_TYPE，但它会在后面的循环中被重置吗？
-                  # 这里的 ERROR_TYPE 是局部变量。
-                  
-                  # 更好的方式：依然把文件加入 relevant_files，但在后续循环中，先检查后缀。
-                  # 或者：不加入 relevant_files，直接报错并 return？
-                  # 如果直接 return，后续正确的文件就不会被检查了。
-                  # 应该继续检查其他文件，但最终标记 PR 失败。
-                  
-                  # 让我们把这个文件也加入检查列表，然后在循环内部再次检查后缀
-                  relevant_files="$relevant_files \"$f\""
-                else
-                  echo "发现相关文件: $f"
-                  relevant_files="$relevant_files \"$f\""
-                fi
-              else
-                echo "忽略无关文件: $f"
-              fi
-            done <<< "$files"
-            
-            if [ -z "$relevant_files" ]; then
-              echo "PR #$pr 中没有相关文件"
-              return
-            fi
-            
-            # 检出 PR
-            gh pr checkout "$pr"
-            
-            ERROR_TYPE=""
-            
-            # 清理 OUTPUT 文件
-            echo "" > "$GITHUB_OUTPUT"
-            
-            # 使用 eval 来正确处理带引号的文件名列表
-            eval "set -- $relevant_files"
-            for file in "$@"; do
-              if [ -f "$file" ]; then
-                 # 再次检查后缀（双重保险，且便于在循环中统一处理错误）
-                 if [[ "$file" != *.json ]]; then
-                    echo "::error file=$file::文件 $file 后缀错误，必须是 .json"
-                    ERROR_TYPE="json_invalid"
-                    break
-                 fi
-                 
-                 # 创建内联脚本 (因为 checkout 可能会覆盖/删除文件，这里每次都重新创建以防万一)
-                 # 或者更好的方式：在 checkout 前创建到 /tmp，这里直接引用 /tmp
-                 
-                 cat << 'EOF' > /tmp/check-pr-content.js
-          const fs = require('fs');
-          const https = require('https');
-          const http = require('http');
-          
-          const TIMEOUT = 10000;
-          
-          const colors = {
-              reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m', blue: '\x1b[34m'
-          };
-          
-          function validateJson(filePath) {
-              try {
-                  let content = fs.readFileSync(filePath, 'utf8');
-                  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
-                  content = content.trim();
-                  
-                  if (content.startsWith('`') && content.endsWith('`')) {
-                      content = content.slice(1, -1).trim();
-                  }
-                  if (content.startsWith('```')) {
-                      const lines = content.split('\n');
-                      if (lines.length >= 2) {
-                          let endIndex = lines.length - 1;
-                          while (endIndex > 0 && !lines[endIndex].trim().startsWith('```')) endIndex--;
-                          if (endIndex > 0) content = lines.slice(1, endIndex).join('\n').trim();
-                      }
-                  }
-                  if (content.startsWith('`') && content.endsWith('`')) content = content.slice(1, -1).trim();
-                  
-                  const data = JSON.parse(content);
-                  
-                  if (data.url) data.url = data.url.replace(/^[`\s]+|[`\s]+$/g, '');
-                  if (data.avatar) data.avatar = data.avatar.replace(/^[`\s]+|[`\s]+$/g, '');
-                  if (data.name) data.name = data.name.replace(/^[`\s]+|[`\s]+$/g, '');
-                  
-                  if (!data.name || !data.url) return { isValid: false, error: "Missing required fields: 'name' or 'url'" };
-                  return { isValid: true, data, error: null };
-                  
-              } catch (err) {
-                  return { isValid: false, error: "Invalid JSON syntax: " + err.message };
-              }
-          }
-          
-          function checkUrl(url) {
-              return new Promise((resolve) => {
-                  if (!url) { resolve({ ok: false, status: 'Missing URL' }); return; }
-                  if (!url.startsWith('http')) { resolve({ ok: true, status: 'Skipped (Non-HTTP)' }); return; }
-                  
-                  const client = url.startsWith('https') ? https : http;
-                  const req = client.request(url, { method: 'GET', headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: TIMEOUT }, (res) => {
-                      res.resume();
-                      if (res.statusCode >= 200 && res.statusCode < 400) resolve({ ok: true, status: res.statusCode });
-                      else resolve({ ok: false, status: res.statusCode });
-                  });
-                  req.on('error', (err) => { resolve({ ok: false, status: err.message }); });
-                  req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 'Timeout' }); });
-                  req.end();
-              });
-          }
-          
-          async function checkPrFile(filePath) {
-              console.log(`\n${colors.blue}Processing: ${filePath}${colors.reset}`);
-              const jsonResult = validateJson(filePath);
-              if (!jsonResult.isValid) {
-                  console.error(`${colors.red}❌ JSON 验证失败: ${jsonResult.error}${colors.reset}`);
-                  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=json_invalid\n");
-                  process.exit(1);
-              }
-              const data = jsonResult.data;
-              console.log(`${colors.green}✅ JSON 语法正确${colors.reset}`);
-              console.log("解析后的 JSON 内容:");
-              console.log(JSON.stringify(data, null, 2));
-              console.log(`名称: ${data.name}`);
-              console.log(`URL: ${data.url}`);
-              if (data.avatar) console.log(`头像: ${data.avatar}`);
-              
-              console.log("正在测试 URL 连通性...");
-              const urlCheck = await checkUrl(data.url);
-              if (!urlCheck.ok) {
-                  console.error(`${colors.red}❌ 主链接不可达: ${urlCheck.status}${colors.reset}`);
-                  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=url_unreachable\n");
-                  process.exit(1);
-              }
-              console.log(`${colors.green}✅ 主链接可访问 (${urlCheck.status})${colors.reset}`);
-              
-              if (data.avatar && data.avatar.startsWith('http')) {
-                  console.log("正在测试头像连通性...");
-                  const avatarCheck = await checkUrl(data.avatar);
-                  if (!avatarCheck.ok) {
-                      console.error(`${colors.red}❌ 头像链接不可达: ${avatarCheck.status}${colors.reset}`);
-                      if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=avatar_unreachable\n");
-                      process.exit(1);
-                  }
-                  console.log(`${colors.green}✅ 头像链接可访问 (${avatarCheck.status})${colors.reset}`);
-              }
-              
-              if (process.env.GITHUB_OUTPUT) {
-                  fs.appendFileSync(process.env.GITHUB_OUTPUT, `name=${data.name}\n`);
-                  fs.appendFileSync(process.env.GITHUB_OUTPUT, "error_type=none\n");
-              }
-          }
-          
-          const filePath = process.argv[2];
-          if (!filePath) { console.error("Usage: node check-pr-content.js <file-path>"); process.exit(1); }
-          checkPrFile(filePath).catch(err => { console.error("Unexpected Error:", err); process.exit(1); });
-          EOF
+          PR_NUMBER=${{ github.event.issue.number }}
 
-                 if ! node /tmp/check-pr-content.js "$file"; then
-                    # 捕获错误
-                    LAST_ERROR=$(grep "error_type=" "$GITHUB_OUTPUT" | tail -n 1 | cut -d= -f2)
-                    if [ -z "$LAST_ERROR" ]; then LAST_ERROR="json_invalid"; fi
-                    if [ -z "$ERROR_TYPE" ]; then ERROR_TYPE="$LAST_ERROR"; fi
-                    if [ "$LAST_ERROR" == "json_invalid" ]; then ERROR_TYPE="json_invalid"; fi
-                    break
-                 fi
-              fi
-            done
-            
-            if [ -n "$ERROR_TYPE" ]; then
-               echo "PR #$pr 失败: $ERROR_TYPE"
-               LABEL=""
-               case "$ERROR_TYPE" in
-                 "json_invalid") LABEL="无效的json" ;;
-                 "url_unreachable") LABEL="网站链接不可达" ;;
-                 "avatar_unreachable") LABEL="头像链接不可达" ;;
-                 *) LABEL="所有链接不可达" ;;
-               esac
-               update_labels "$LABEL" "$pr"
-            else
-               echo "PR #$pr 通过。"
-               update_labels "链接检查通过" "$pr"
-            fi
-          }
-          
-          if [ "$MODE" == "single" ]; then
-            if [ -z "$PR_NUM" ]; then echo "需要提供 PR 编号"; exit 1; fi
-            validate_pr "$PR_NUM"
-          elif [ "$MODE" == "all_open" ]; then
-            # 列出所有开启的 PR
-            prs=$(gh pr list --state open --json number --jq '.[].number')
-            for pr in $prs; do
-              validate_pr "$pr"
-            done
+          AUTHOR=$(gh pr view $PR_NUMBER --json author -q .author.login)
+          COMMENTER=${{ github.event.comment.user.login }}
+
+          if [ "$AUTHOR" != "$COMMENTER" ]; then
+            echo "❌ 只有 PR 作者可以触发验证"
+            exit 1
           fi
+
+          TOKEN=$(gh api repos/${{ github.repository }}/issues/$PR_NUMBER/comments \
+            --jq '.[] | select(.body | contains(".txt")) | .body' \
+            | grep -oE '[a-f0-9]{12}' | head -n1)
+
+          if [ -z "$TOKEN" ]; then
+            echo "❌ 未找到 token"
+            exit 1
+          fi
+
+          FILE=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          URL=$(jq -r '.url' $FILE)
+          SHA=$(gh pr view $PR_NUMBER --json headRefOid -q .headRefOid)
+
+          VERIFY_URL="${URL}/${TOKEN}.txt"
+
+          RESPONSE=$(curl -L -s --max-redirs 5 --max-time 10 "$VERIFY_URL")
+
+          if [ "$RESPONSE" != "$SHA" ]; then
+            echo "❌ 所有权验证失败"
+            exit 1
+          fi
+
+      - name: Mark Verified
+        if: success() && github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ["ownership-verified"]
+            })
