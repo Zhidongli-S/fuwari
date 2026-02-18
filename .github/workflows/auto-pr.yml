@@ -324,8 +324,9 @@ jobs:
             core.info(`bidir: siteBase=${siteBase || ''}`)
             core.info(`bidir: existingLabels=${Array.from(existingLabelNames).join(',')}`)
             if (primary.kind === 'friend') {
-              const isBidirFlow = existingLabelNames.has(LABEL_BIDIR) || existingLabelNames.has(LABEL_BIDIR_OK) || context.payload.action === 'opened'
-              core.info(`bidir: primary.kind=friend isBidirFlow=${isBidirFlow}`)
+              const isLegacyFlow = existingLabelNames.has(LABEL_VERIFYING)
+              const isBidirFlow = !isLegacyFlow
+              core.info(`bidir: primary.kind=friend isLegacyFlow=${isLegacyFlow} isBidirFlow=${isBidirFlow}`)
               if (isBidirFlow) {
                 if (!siteBase) {
                   core.info('bidir: missing siteBase -> comment and return')
