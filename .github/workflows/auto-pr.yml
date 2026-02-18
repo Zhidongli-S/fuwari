@@ -316,7 +316,7 @@ jobs:
                   await createComment('无法读取本站 site 配置，无法进行双向链接验证。')
                   return
                 }
-                if (context.payload.action === 'opened' && !existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
+                if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
                   await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
                 }
 
